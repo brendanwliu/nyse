@@ -37,7 +37,7 @@ def extract_price(ticker):
     dataset_raw.to_csv('_'+ticker+'_prices.csv')
 def prep_data(ticker):
     '''takes the extracted stock prices and drops the symbol column and returns the dataset'''
-    dataset_ticker_raw = pd.read_csv('_'+ticker+'_prices.csv')
+    dataset_ticker_raw = pd.read_csv('data_input/'+'_'+ticker+'_prices.csv')
     dataset_ticker_raw = dataset_ticker_raw.drop('symbol', axis = 1)
     return dataset_ticker_raw
 #extract_price('GS')
@@ -75,7 +75,7 @@ def get_technicals_indic(dataset):
     # dataset['ema'] = dataset['close'].ewm(com = 0.5).mean()
 
     #momentum
-    #dataset['momentum'] = dataset['close'].pct_change()
+    dataset['momentum'] = dataset['close'].pct_change()
 
     return dataset
 
