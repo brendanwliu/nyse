@@ -4,14 +4,12 @@ import matplotlib
 import numpy as np
 import pandas as pd
 import pickle
-import plotly.graph_objs as go
 import time
 
 from collections import defaultdict
 from datetime import date
 from fastai.tabular import add_datepart
 from matplotlib import pyplot as plt
-from pylab import rcParams
 from sklearn.metrics import mean_squared_error
 from sklearn.preprocessing import LabelEncoder
 from sklearn.preprocessing import StandardScaler
@@ -21,7 +19,7 @@ from fastai.tabular import add_datepart
 from data_technicals_methods import get_technicals_indic, plotting_TI
 
 ## Common functions ----------------------------------------------------------------------------------------------------------------------
-## Credit for a lot of  these functions goes to Yibin Ng -------------------------------------------------------------------------------------------
+## Credit for a lot of these functions goes to Yibin Ng -------------------------------------------------------------------------------------------
 def get_mape(y_true, y_pred): 
     """
     Compute mean absolute percentage error (MAPE)
@@ -69,24 +67,24 @@ def get_mov_avg_std(df, col, N):
 
 def do_scaling(df, N):
     """
-    Do scaling for the adj_close and lag cols
+    Do scaling for the close and lag cols
     """
-    df.loc[:, 'adj_close_scaled'] = (df['adj_close'] - df['adj_close_mean']) / df['adj_close_std']
+    df.loc[:, 'close_scaled'] = (df['close'] - df['close_mean']) / df['close_std']
     for n in range(N,0,-1):
-        df.loc[:, 'adj_close_scaled_lag_'+str(n)] = \
-            (df['adj_close_lag_'+str(n)] - df['adj_close_mean']) / df['adj_close_std']
+        df.loc[:, 'close_scaled_lag_'+str(n)] = \
+            (df['close_lag_'+str(n)] - df['close_mean']) / df['close_std']
         
-        # Remove adj_close_lag column which we don't need anymore
-        df.drop(['adj_close_lag_'+str(n)], axis=1, inplace=True)
+        # Remove close_lag column which we don't need anymore
+        df.drop(['close_lag_'+str(n)], axis=1, inplace=True)
 
     return df
 
-def pred_xgboost(model, X_test_ex_adj_close, N, H, prev_vals, prev_mean_val, prev_std_val):
+def pred_xgboost(model, X_test_ex_close, N, H, prev_vals, prev_mean_val, prev_std_val):
     """
     Do recursive forecasting using xgboost
     Inputs
         model              : the xgboost model
-        X_test_ex_adj_close: features of the test set, excluding adj_close_scaled values 
+        X_test_ex_close: features of the test set, excluding close_scaled values 
         N                  : for feature at day t, we use lags from t-1, t-2, ..., t-N as features
         H                  : forecast horizon
         prev_vals          : numpy array. If predict at time t, 
@@ -102,9 +100,9 @@ def pred_xgboost(model, X_test_ex_adj_close, N, H, prev_vals, prev_mean_val, pre
         forecast_scaled = (forecast[-N:] - prev_mean_val) / prev_std_val
         
         # Create the features dataframe
-        X = X_test_ex_adj_close[n:n+1].copy()
+        X = X_test_ex_close[n:n+1].copy()
         for n in range(N,0,-1):
-            X.loc[:, "adj_close_scaled_lag_"+str(n)] = forecast_scaled[-n]
+            X.loc[:, "close_scaled_lag_"+str(n)] = forecast_scaled[-n]
         
         # Do prediction
         est_scaled = model.predict(X)
@@ -121,7 +119,7 @@ def pred_xgboost(model, X_test_ex_adj_close, N, H, prev_vals, prev_mean_val, pre
 
 def train_pred_eval_model(X_train_scaled,
                           y_train_scaled,
-                          X_test_ex_adj_close,
+                          X_test_ex_close,
                           y_test,
                           N,
                           H,
@@ -143,7 +141,7 @@ def train_pred_eval_model(X_train_scaled,
     Inputs
         X_train_scaled     : features for training. Scaled to have mean 0 and variance 1
         y_train_scaled     : target for training. Scaled to have mean 0 and variance 1
-        X_test_ex_adj_close: features of the test set, excluding adj_close_scaled values 
+        X_test_ex_close: features of the test set, excluding close_scaled values 
         y_test             : target for test. Actual values, not scaled.
         N                  : for feature at day t, we use lags from t-1, t-2, ..., t-N as features
         H                  : forecast horizon
@@ -182,7 +180,7 @@ def train_pred_eval_model(X_train_scaled,
     model.fit(X_train_scaled, y_train_scaled)
     
     # Get predicted labels and scale back to original range
-    est = pred_xgboost(model, X_test_ex_adj_close, N, H, prev_vals, prev_mean_val, prev_std_val)
+    est = pred_xgboost(model, X_test_ex_close, N, H, prev_vals, prev_mean_val, prev_std_val)
 
     # Calculate RMSE, MAPE, MAE
     rmse = get_rmse(y_test, est)
@@ -194,7 +192,7 @@ def train_pred_eval_model(X_train_scaled,
 def add_lags(df, N, lag_cols):
     """
     Add lags up to N number of days to use as features
-    The lag columns are labelled as 'adj_close_lag_1', 'adj_close_lag_2', ... etc.
+    The lag columns are labelled as 'close_lag_1', 'close_lag_2', ... etc.
     """
     # Use lags up to N number of days to use as features
     df_w_lags = df.copy()
@@ -256,16 +254,16 @@ def get_error_metrics(df,
     preds_dict = {}
     
     # Add lags up to N number of days to use as features
-    df = add_lags(df, N, ['adj_close'])
+    df = add_lags(df, N, ['close'])
     
     # Get mean and std dev at timestamp t using values from t-1, ..., t-N
-    df = get_mov_avg_std(df, 'adj_close', N)
+    df = get_mov_avg_std(df, 'close', N)
     
     # Do scaling
     df = do_scaling(df, N)
     
     # Get list of features
-    features_ex_adj_close = [
+    features_ex_close = [
         'year',
         'month',
         'week',
@@ -278,9 +276,9 @@ def get_error_metrics(df,
         'is_quarter_start',
         'is_year_end'
     ]
-    features = features_ex_adj_close # features contain all features, including adj_close_lags
+    features = features_ex_close # features contain all features, including close_lags
     for n in range(N,0,-1):
-        features.append("adj_close_scaled_lag_"+str(n))
+        features.append("close_scaled_lag_"+str(n))
     
     for i in range(train_size, len(df)-H+1, int(H/2)):
         # Split into train and test
@@ -292,16 +290,16 @@ def get_error_metrics(df,
     
         # Split into X and y
         X_train_scaled = train[features]
-        y_train_scaled = train['adj_close_scaled']
-        X_test_ex_adj_close = test[features_ex_adj_close]
-        y_test = test['adj_close']
-        prev_vals = train[-N:]['adj_close'].to_numpy()
-        prev_mean_val = test.iloc[0]['adj_close_mean']
-        prev_std_val = test.iloc[0]['adj_close_std']
+        y_train_scaled = train['close_scaled']
+        X_test_ex_close = test[features_ex_close]
+        y_test = test['close']
+        prev_vals = train[-N:]['close'].to_numpy()
+        prev_mean_val = test.iloc[0]['close_mean']
+        prev_std_val = test.iloc[0]['close_std']
             
         rmse, mape, mae, est, _ = train_pred_eval_model(X_train_scaled,
                                                         y_train_scaled,
-                                                        X_test_ex_adj_close,
+                                                        X_test_ex_close,
                                                         y_test,
                                                         N,
                                                         H,
@@ -360,16 +358,16 @@ def get_error_metrics_one_pred(df,
         rmse, mape, mae, predictions
     """    
     # Add lags up to N number of days to use as features
-    df = add_lags(df, N, ['adj_close'])
+    df = add_lags(df, N, ['close'])
     
     # Get mean and std dev at timestamp t using values from t-1, ..., t-N
-    df = get_mov_avg_std(df, 'adj_close', N)
+    df = get_mov_avg_std(df, 'close', N)
     
     # Do scaling
     df = do_scaling(df, N)
     
     # Get list of features
-    features_ex_adj_close = [
+    features_ex_close = [
         'year',
         'month',
         'week',
@@ -382,9 +380,9 @@ def get_error_metrics_one_pred(df,
         'is_quarter_start',
         'is_year_end'
     ]
-    features = features_ex_adj_close # features contain all features, including adj_close_lags
+    features = features_ex_close # features contain all features, including close_lags
     for n in range(N,0,-1):
-        features.append("adj_close_scaled_lag_"+str(n))
+        features.append("close_scaled_lag_"+str(n))
     
     # Split into train and test
     train = df[:train_size].copy()
@@ -395,16 +393,16 @@ def get_error_metrics_one_pred(df,
     
     # Split into X and y
     X_train_scaled = train[features]
-    y_train_scaled = train['adj_close_scaled']
-    X_test_ex_adj_close = test[features_ex_adj_close]
-    y_test = test['adj_close']
-    prev_vals = train[-N:]['adj_close'].to_numpy()
-    prev_mean_val = test.iloc[0]['adj_close_mean']
-    prev_std_val = test.iloc[0]['adj_close_std']
+    y_train_scaled = train['close_scaled']
+    X_test_ex_close = test[features_ex_close]
+    y_test = test['close']
+    prev_vals = train[-N:]['close'].to_numpy()
+    prev_mean_val = test.iloc[0]['close_mean']
+    prev_std_val = test.iloc[0]['close_std']
             
     rmse, mape, mae, est, feature_importances = train_pred_eval_model(X_train_scaled,
                                                                       y_train_scaled,
-                                                                      X_test_ex_adj_close,
+                                                                      X_test_ex_close,
                                                                       y_test,
                                                                       N,
                                                                       H,
